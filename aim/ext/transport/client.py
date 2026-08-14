@@ -1,26 +1,30 @@
-import requests
 import base64
 import logging
 import os
+import ssl
 import threading
 import uuid
 import weakref
 
 from copy import deepcopy
 from typing import Tuple
-from websockets.sync.client import connect
 
-from aim.ext.transport.utils import handle_exception
+import requests
+
+from aim.ext.transport.config import AIM_CLIENT_SSL_CERTIFICATES_FILE
+from aim.ext.transport.heartbeat import HeartbeatSender
 from aim.ext.transport.message_utils import (
-    raise_exception,
-    pack_args,
-    unpack_stream,
-    unpack_args,
+    decode_tree,
     encode_tree,
-    decode_tree
+    pack_args,
+    raise_exception,
+    unpack_args,
+    unpack_stream,
 )
 from aim.ext.transport.request_queue import RequestQueue
-from aim.ext.transport.heartbeat import HeartbeatSender
+from aim.ext.transport.utils import handle_exception
+from websockets.sync.client import connect
+
 
 AIM_CLIENT_QUEUE_MAX_MEMORY = '__AIM_CLIENT_QUEUE_MAX_MEMORY__'
 DEFAULT_RETRY_INTERVAL = 0.1  # 100 ms
@@ -41,6 +45,13 @@ class Client:
         self._http_protocol = 'http://'
         self._ws_protocol = 'ws://'
         self.request_headers = {}
+
+        self.ssl_certfile = os.getenv(AIM_CLIENT_SSL_CERTIFICATES_FILE)
+        self.ssl_context = None
+        if self.ssl_certfile:
+            self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            self.ssl_context.load_cert_chain(certfile=self.ssl_certfile)
+
         self.protocol_probe()
 
         self._resource_pool = weakref.WeakValueDictionary()
@@ -53,7 +64,7 @@ class Client:
             f'remote_tracker_{self._id}',
             max_queue_memory=os.getenv(AIM_CLIENT_QUEUE_MAX_MEMORY, 1024 * 1024 * 1024),
             retry_count=DEFAULT_RETRY_COUNT,
-            retry_interval=DEFAULT_RETRY_INTERVAL
+            retry_interval=DEFAULT_RETRY_INTERVAL,
         )
         self._heartbeat_sender = HeartbeatSender(self)
         self._heartbeat_sender.start()
@@ -63,7 +74,7 @@ class Client:
     def protocol_probe(self):
         endpoint = f'http://{self.remote_path}/status/'
         try:
-            response = requests.get(endpoint, headers=self.request_headers)
+            response = requests.get(endpoint, headers=self.request_headers, timeout=10)
             if response.status_code == 200:
                 if response.url.startswith('https://'):
                     self._http_protocol = 'https://'
@@ -74,7 +85,7 @@ class Client:
 
         endpoint = f'https://{self.remote_path}/status/'
         try:
-            response = requests.get(endpoint, headers=self.request_headers)
+            response = requests.get(endpoint, headers=self.request_headers, timeout=10, verify=self.ssl_certfile)
             if response.status_code == 200:
                 self._http_protocol = 'https://'
                 self._ws_protocol = 'wss://'
@@ -91,18 +102,24 @@ class Client:
         for handler in handlers_list:
             self.reinitialize_resource(handler)
 
-    @handle_exception(requests.ConnectionError,
-                      error_message='Failed to connect to Aim Server. Have you forgot to run `aim server` command?')
+    @handle_exception(
+        requests.ConnectionError,
+        error_message='Failed to connect to Aim Server. Have you forgot to run `aim server` command?',
+    )
     def _check_remote_version_compatibility(self):
         from aim.__version__ import __version__ as client_version
 
-        error_message_template = 'The Aim Remote tracking server version ({}) '\
-                                 'is not compatible with the Aim client version ({}).'\
-                                 'Please upgrade either the Aim Client or the Aim Remote.'
+        error_message_template = (
+            'The Aim Remote tracking server version ({}) '
+            'is not compatible with the Aim client version ({}).'
+            'Please upgrade either the Aim Client or the Aim Remote.'
+        )
 
-        warning_message_template = 'The Aim Remote tracking server version ({}) ' \
-                                   'and the Aim client version ({}) do not match.' \
-                                   'Consider upgrading either the client or remote tracking server.'
+        warning_message_template = (
+            'The Aim Remote tracking server version ({}) '
+            'and the Aim client version ({}) do not match.'
+            'Consider upgrading either the client or remote tracking server.'
+        )
 
         remote_version = self.get_version()
 
@@ -124,18 +141,20 @@ class Client:
 
     def client_heartbeat(self):
         endpoint = f'{self._http_protocol}{self._client_endpoint}/heartbeat/{self.uri}/'
-        response = requests.get(endpoint, headers=self.request_headers)
+        response = requests.get(endpoint, headers=self.request_headers, timeout=10, verify=self.ssl_certfile)
         response_json = response.json()
         if response.status_code != 200:
             raise_exception(response_json.get('message'))
 
         return response
 
-    @handle_exception(requests.ConnectionError,
-                      error_message='Failed to connect to Aim Server. Have you forgot to run `aim server` command?')
+    @handle_exception(
+        requests.ConnectionError,
+        error_message='Failed to connect to Aim Server. Have you forgot to run `aim server` command?',
+    )
     def connect(self):
         endpoint = f'{self._http_protocol}{self._client_endpoint}/connect/{self.uri}/'
-        response = requests.get(endpoint, headers=self.request_headers)
+        response = requests.get(endpoint, headers=self.request_headers, timeout=10, verify=self.ssl_certfile)
         response_json = response.json()
         if response.status_code != 200:
             raise_exception(response_json.get('message'))
@@ -144,7 +163,7 @@ class Client:
 
     def reconnect(self):
         endpoint = f'{self._http_protocol}{self._client_endpoint}/reconnect/{self.uri}/'
-        response = requests.get(endpoint, headers=self.request_headers)
+        response = requests.get(endpoint, headers=self.request_headers, timeout=10, verify=self.ssl_certfile)
         response_json = response.json()
         if response.status_code != 200:
             raise_exception(response_json.get('message'))
@@ -160,16 +179,18 @@ class Client:
             self._ws.close()
 
         endpoint = f'{self._http_protocol}{self._client_endpoint}/disconnect/{self.uri}/'
-        response = requests.get(endpoint, headers=self.request_headers)
+        response = requests.get(endpoint, headers=self.request_headers, timeout=10, verify=self.ssl_certfile)
         response_json = response.json()
         if response.status_code != 200:
             raise_exception(response_json.get('message'))
 
         return response
 
-    def get_version(self,):
+    def get_version(
+        self,
+    ):
         endpoint = f'{self._http_protocol}{self._client_endpoint}/get-version/'
-        response = requests.get(endpoint, headers=self.request_headers)
+        response = requests.get(endpoint, headers=self.request_headers, timeout=10, verify=self.ssl_certfile)
         response_json = response.json()
         if response.status_code == 404:
             return '<3.19.0'
@@ -183,10 +204,10 @@ class Client:
         request_data = {
             'resource_handler': handler,
             'resource_type': resource_type,
-            'args': base64.b64encode(args).decode()
+            'args': base64.b64encode(args).decode(),
         }
 
-        response = requests.post(endpoint, json=request_data, headers=self.request_headers)
+        response = requests.post(endpoint, json=request_data, headers=self.request_headers, verify=self.ssl_certfile)
         response_json = response.json()
         if response.status_code == 400:
             raise_exception(response_json.get('exception'))
@@ -203,7 +224,7 @@ class Client:
         if queue_id != -1:
             self.get_queue().wait_for_finish()
 
-        response = requests.get(endpoint, headers=self.request_headers)
+        response = requests.get(endpoint, headers=self.request_headers, timeout=10, verify=self.ssl_certfile)
         response_json = response.json()
         if response.status_code == 400:
             raise_exception(response_json.get('exception'))
@@ -217,14 +238,16 @@ class Client:
 
         if is_write_only:
             assert queue_id != -1
-            if getattr(self._thread_local, 'atomic_instructions', None) is not None and \
-                    self._thread_local.atomic_instructions.get(queue_id, None) is not None:
+            if (
+                getattr(self._thread_local, 'atomic_instructions', None) is not None
+                and self._thread_local.atomic_instructions.get(queue_id, None) is not None
+            ):
                 self._thread_local.atomic_instructions[queue_id].append((resource, method, args))
                 return
 
             self.get_queue().register_task(
-                self,
-                self._run_write_instructions, list(encode_tree([(resource, method, args)], strict=False)))
+                self, self._run_write_instructions, list(encode_tree([(resource, method, args)], strict=False))
+            )
             return
 
         return self._run_read_instructions(queue_id, resource, method, args)
@@ -235,13 +258,15 @@ class Client:
         request_data = {
             'resource_handler': resource,
             'method_name': method,
-            'args': base64.b64encode(pack_args(encode_tree(args))).decode()
+            'args': base64.b64encode(pack_args(encode_tree(args))).decode(),
         }
 
         if queue_id != -1:
             self.get_queue().wait_for_finish()
 
-        response = requests.post(endpoint, json=request_data, stream=True, headers=self.request_headers)
+        response = requests.post(
+            endpoint, json=request_data, stream=True, headers=self.request_headers, verify=self.ssl_certfile
+        )
 
         if response.status_code == 400:
             raise_exception(response.json().get('exception'))
@@ -269,18 +294,22 @@ class Client:
             return
 
         self.get_queue().register_task(
-            self,
-            self._run_write_instructions, list(encode_tree(self._thread_local.atomic_instructions[hash_])))
+            self, self._run_write_instructions, list(encode_tree(self._thread_local.atomic_instructions[hash_]))
+        )
         del self._thread_local.atomic_instructions[hash_]
 
     def refresh_ws(self):
-        self._ws = connect(f'{self._ws_protocol}{self._tracking_endpoint}/{self.uri}/write-instruction/')
+        self._ws = connect(f'{self._ws_protocol}{self._tracking_endpoint}/{self.uri}/write-instruction/', max_size=None)
 
     @property
     def ws(self):
         if self._ws is None:
-            self._ws = connect(f'{self._ws_protocol}{self._tracking_endpoint}/{self.uri}/write-instruction/',
-                               additional_headers=self.request_headers)
+            self._ws = connect(
+                f'{self._ws_protocol}{self._tracking_endpoint}/{self.uri}/write-instruction/',
+                additional_headers=self.request_headers,
+                max_size=None,
+                ssl_context=self.ssl_context,
+            )
 
         return self._ws
 

@@ -1,7 +1,7 @@
 import os
 
-from aim.sdk.repo import Repo
 from aim.sdk.configs import get_aim_repo_name
+from aim.sdk.repo import Repo
 from aim.web.utils import get_root_path
 
 
@@ -18,7 +18,6 @@ class Project:
 
     def cleanup_repo_pools(self):
         self.repo.container_pool.clear()
-        self.repo.container_view_pool.clear()
         self.repo.persistent_pool.clear()
 
     def cleanup_sql_caches(self):

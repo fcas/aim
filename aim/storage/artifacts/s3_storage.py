@@ -1,11 +1,13 @@
 import pathlib
 import tempfile
 
-from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import wait as wait_for_finish
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor, wait as wait_for_finish
+from urllib.parse import urlparse
 
 from aim.ext.cleanup import AutoClean
+
 from .artifact_storage import AbstractArtifactStorage
 
 
@@ -66,5 +68,27 @@ class S3ArtifactStorage(AbstractArtifactStorage):
 
     def _get_s3_client(self):
         import boto3
+
         client = boto3.client('s3')
         return client
+
+
+def S3ArtifactStorage_factory(**boto3_client_kwargs):
+    class S3ArtifactStorageCustom(S3ArtifactStorage):
+        def _get_s3_client(self):
+            import boto3
+            import botocore
+
+            if 'config' in boto3_client_kwargs and isinstance(boto3_client_kwargs['config'], dict):
+                config_kwargs = boto3_client_kwargs.pop('config')
+                boto3_client_kwargs['config'] = botocore.config.Config(**config_kwargs)
+            client = boto3.client('s3', **boto3_client_kwargs)
+            return client
+
+    return S3ArtifactStorageCustom
+
+
+def S3ArtifactStorage_clientconfig(**boto3_client_kwargs):
+    from aim.storage.artifacts import registry
+
+    registry.registry['s3'] = S3ArtifactStorage_factory(**boto3_client_kwargs)

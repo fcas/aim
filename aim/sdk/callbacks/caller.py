@@ -1,10 +1,13 @@
-import logging
 import inspect
+import logging
 import traceback
-from collections import defaultdict
-from typing import Callable, List, Optional, Dict, Any
 
-from aim.sdk.callbacks.helpers import handles_events, get_handler_event_names
+from collections import defaultdict
+from typing import Any, Callable, Dict, List, Optional
+
+from aim.sdk.callbacks.helpers import get_handler_event_names, handles_events
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +42,7 @@ class Caller:
         for handler in handlers:
             try:
                 handler(**all_kwargs)
-            except Exception:  # noqa
+            except Exception:
                 # TODO catch errors on handler invocation (nice-to-have)
-                logger.warning(f'Failed to run callback \'{handler.__name__}\'.')
+                logger.warning(f"Failed to run callback '{handler.__name__}'.")
                 logger.warning(traceback.format_exc())

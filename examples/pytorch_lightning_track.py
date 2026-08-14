@@ -1,9 +1,10 @@
 import importlib.util
 import os
 
-if importlib.util.find_spec("lightning"):
+
+if importlib.util.find_spec('lightning'):
     import lightning.pytorch as pl
-elif importlib.util.find_spec("pytorch_lightning"): # noqa F401
+elif importlib.util.find_spec('pytorch_lightning'):  # F401
     import pytorch_lightning as pl
 else:
     raise RuntimeError(
@@ -15,6 +16,7 @@ from aim.pytorch_lightning import AimLogger
 from torch import nn, optim, utils
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
+
 
 # define any number of nn.Modules (or use your current ones)
 encoder = nn.Sequential(nn.Linear(28 * 28, 128), nn.ReLU(), nn.Linear(128, 3))
@@ -52,7 +54,6 @@ class LitAutoEncoder(pl.LightningModule):
         self.log('test_loss', loss)
         return loss
 
-
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=1e-3)
         return optimizer
@@ -75,15 +76,10 @@ test_loader = utils.data.DataLoader(test_dataset)
 # create AimLogger and call the fit to start the training
 aim_logger = AimLogger(
     experiment='example_experiment',
-    train_metric_prefix='train_',
-    test_metric_prefix='test_',
-    val_metric_prefix='val_',
 )
 
 
 trainer = pl.Trainer(limit_train_batches=100, max_epochs=5, logger=aim_logger)
-trainer.fit(
-    model=autoencoder, train_dataloaders=train_loader, val_dataloaders=val_loader
-)
+trainer.fit(model=autoencoder, train_dataloaders=train_loader, val_dataloaders=val_loader)
 
 trainer.test(dataloaders=test_loader)

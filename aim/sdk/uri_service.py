@@ -1,15 +1,15 @@
-from cryptography.fernet import Fernet
 from collections import defaultdict
-from typing import Iterator, List, Optional, Dict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Iterator, List, Optional
 
-from aim.storage.encoding import encode_path, decode_path
+from aim.storage.encoding import decode_path, encode_path
 from aim.storage.types import BLOB
+from cryptography.fernet import Fernet
+
 
 if TYPE_CHECKING:
-    from aim.storage.types import AimObjectPath
-    from aim.storage.prefixview import PrefixView
     from aim.sdk.repo import Repo
+    from aim.storage.prefixview import PrefixView
+    from aim.storage.types import AimObjectPath
 
 
 def generate_resource_path(prefix_view: 'PrefixView', additional_path: 'AimObjectPath') -> str:
@@ -55,7 +55,7 @@ class URIService:
             for uri, sub_name, resource_path in self.runs_pool[run_name]:
                 container = run_containers.get(sub_name)
                 if not container:
-                    container = self._get_container(run_name, sub_name)
+                    container = self.repo.request_container(sub_name, run_name, read_only=True)
                     run_containers[sub_name] = container
 
                 resource_path = decode_path(bytes.fromhex(resource_path))
@@ -70,11 +70,3 @@ class URIService:
 
         # clear runs pool
         self.runs_pool.clear()
-
-    def _get_container(self, run_name: str, sub_name: str):
-        if sub_name == 'meta':
-            container = self.repo.request(sub_name, run_name, from_union=True, read_only=True)
-        else:
-            container = self.repo.request(sub_name, run_name, read_only=True)
-
-        return container

@@ -273,6 +273,7 @@ export const ANALYTICS_EVENT_KEYS = {
       },
       settings: {
         tabView: '[Experiment] [Settings] Tab view',
+        deleteExperiment: '[Experiment] [Settings] Delete experiment',
       },
     },
     table: {
@@ -356,6 +357,12 @@ export const ANALYTICS_EVENT_KEYS = {
     table: {
       compareSelectedRuns: '[MetricsExplorer][Table] Compare selected runs',
     },
+  },
+  reports: {
+    pageView: '[ReportsPage] Page view',
+  },
+  report: {
+    pageView: '[ReportPage] Page view',
   },
   sidebar: {
     discord: '[Sidebar] Click on discord community link',

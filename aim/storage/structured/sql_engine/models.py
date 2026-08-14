@@ -1,3 +1,6 @@
+import datetime
+import uuid
+
 from sqlalchemy import (
     Boolean,
     Column,
@@ -7,11 +10,9 @@ from sqlalchemy import (
     Table,
     Text,
 )
-from sqlalchemy.orm import relationship, backref, validates
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import backref, relationship, validates
 
-import uuid
-import datetime
 
 Base = declarative_base()
 
@@ -25,9 +26,10 @@ def default_to_run_hash(context):
 
 
 run_tags = Table(
-    'run_tag', Base.metadata,
-    Column('run_id', Integer, ForeignKey('run.id'), primary_key=True, nullable=False),
-    Column('tag_id', Integer, ForeignKey('tag.id'), primary_key=True, nullable=False)
+    'run_tag',
+    Base.metadata,
+    Column('run_id', Integer, ForeignKey('run.id', ondelete='CASCADE'), primary_key=True, nullable=False),
+    Column('tag_id', Integer, ForeignKey('tag.id'), primary_key=True, nullable=False),
 )
 
 
@@ -49,7 +51,9 @@ class Run(Base):
     experiment_id = Column(ForeignKey('experiment.id'), nullable=True)
 
     experiment = relationship('Experiment', backref=backref('runs', uselist=True, order_by='Run.created_at.desc()'))
-    tags = relationship('Tag', secondary=run_tags, backref=backref('runs', uselist=True))
+    tags = relationship(
+        'Tag', secondary=run_tags, backref=backref('runs', uselist=True), cascade='all, delete', passive_deletes=True
+    )
     notes = relationship('Note', back_populates='run')
 
     def __init__(self, run_hash, created_at=None):
@@ -104,7 +108,7 @@ class Note(Base):
 
     id = Column(Integer, autoincrement=True, primary_key=True)
     content = Column(Text, nullable=False, default='')
-    run_id = Column(Integer, ForeignKey('run.id'))
+    run_id = Column(Integer, ForeignKey('run.id', ondelete='CASCADE'),)
     experiment_id = Column(Integer, ForeignKey('experiment.id'))
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
@@ -146,4 +150,4 @@ class RunInfo(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     last_notification_index = Column(Integer, default=-1)
-    run = relationship('Run', uselist=False, backref=backref("info", uselist=False))
+    run = relationship('Run', uselist=False, backref=backref('info', uselist=False))

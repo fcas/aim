@@ -17,6 +17,7 @@ const ENDPOINTS = {
     BASE: '/experiments',
     GET: '',
     CREATE: '',
+    DELETE: '',
     SEARCH: 'search',
     GET_ACTIVITY: 'activity',
     GET_NOTE: 'note',
@@ -45,6 +46,22 @@ const ENDPOINTS = {
   AUTH: {
     BASE: 'auth',
     REFRESH: 'refresh',
+  },
+  BOARDS: {
+    BASE: '/boards',
+    GET: '',
+    CREATE: '',
+    UPDATE: '',
+    DELETE: '',
+    TEMPLATES: '/templates',
+    RESET: '/reset',
+  },
+  REPORTS: {
+    BASE: '/reports',
+    GET: '',
+    CREATE: '',
+    UPDATE: '',
+    DELETE: '',
   },
 };
 

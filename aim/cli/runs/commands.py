@@ -1,18 +1,19 @@
-import click
 import os
-import tqdm
 
 from multiprocessing.pool import ThreadPool
-from psutil import cpu_count
 
-from aim.cli.runs.utils import match_runs, make_zip_archive, upload_repo_runs
+import click
+import tqdm
+
+from aim.cli.runs.utils import make_zip_archive, match_runs, upload_repo_runs
+from aim.sdk.index_manager import RepoIndexManager
 from aim.sdk.repo import Repo
+from aim.sdk.sequences.sequence_type_map import SEQUENCE_TYPE_MAP
+from psutil import cpu_count
 
 
 @click.group()
-@click.option('--repo', required=False,
-              default=os.getcwd(),
-              type=str)
+@click.option('--repo', required=False, default=os.getcwd(), type=str)
 @click.pass_context
 def runs(ctx, repo):
     """Manage runs in aim repository."""
@@ -21,17 +22,18 @@ def runs(ctx, repo):
 
 
 @runs.command(name='ls')
+@click.option('--corrupted', is_flag=True, help='List corrupted runs only')
 @click.pass_context
-def list_runs(ctx):
+def list_runs(ctx, corrupted):
     """List Runs available in Repo."""
     repo_path = ctx.obj['repo']
     if not Repo.is_remote_path(repo_path):
         if not Repo.exists(repo_path):
-            click.echo(f'\'{repo_path}\' is not a valid aim repo.')
+            click.echo(f"'{repo_path}' is not a valid aim repo.")
             exit(1)
 
     repo = Repo.from_path(repo_path)
-    run_hashes = repo.list_all_runs()
+    run_hashes = repo.list_corrupted_runs() if corrupted else repo.list_all_runs()
 
     click.echo('\t'.join(run_hashes))
     click.echo(f'Total {len(run_hashes)} runs.')
@@ -40,27 +42,37 @@ def list_runs(ctx):
 @runs.command(name='rm')
 @click.argument('hashes', nargs=-1, type=str)
 @click.pass_context
+@click.option('--corrupted', is_flag=True, help='Remove all corrupted runs')
 @click.option('-y', '--yes', is_flag=True, help='Automatically confirm prompt')
-def remove_runs(ctx, hashes, yes):
+def remove_runs(ctx, hashes, corrupted, yes):
     """Remove Run data for given run hashes."""
-    if len(hashes) == 0:
-        click.echo('Please specify at least one Run to delete.')
+    if len(hashes) == 0 and corrupted is False:
+        click.echo('Please specify Run hashes or `--corrupted` flag to delete runs.')
         exit(1)
     repo_path = ctx.obj['repo']
     repo = Repo.from_path(repo_path)
 
-    matched_hashes = match_runs(repo, hashes)
+    if corrupted:
+        run_hashes = repo.list_corrupted_runs()
+    else:
+        run_hashes = match_runs(repo, hashes)
+    if len(run_hashes) == 0:
+        click.echo('No matching runs found.')
+        exit(0)
+
     if yes:
         confirmed = True
     else:
-        confirmed = click.confirm(f'This command will permanently delete {len(matched_hashes)} runs from aim repo '
-                                  f'located at \'{repo_path}\'. Do you want to proceed?')
+        confirmed = click.confirm(
+            f'This command will permanently delete {len(run_hashes)} runs from aim repo '
+            f"located at '{repo_path}'. Do you want to proceed?"
+        )
     if not confirmed:
         return
 
-    success, remaining_runs = repo.delete_runs(matched_hashes)
+    success, remaining_runs = repo.delete_runs(run_hashes)
     if success:
-        click.echo(f'Successfully deleted {len(matched_hashes)} runs.')
+        click.echo(f'Successfully deleted {len(run_hashes)} runs.')
     else:
         click.echo('Something went wrong while deleting runs. Remaining runs are:', err=True)
         click.secho('\t'.join(remaining_runs), fg='yellow')
@@ -89,8 +101,7 @@ def copy_runs(ctx, destination, hashes):
 
 
 @runs.command(name='mv')
-@click.option('--destination', required=True,
-              type=str)
+@click.option('--destination', required=True, type=str)
 @click.argument('hashes', nargs=-1, type=str)
 @click.pass_context
 def move_runs(ctx, destination, hashes):
@@ -119,7 +130,7 @@ def upload_runs(ctx, bucket):
     """Upload Repo backup to the given S3 bucket."""
     repo_path = ctx.obj['repo']
     if not Repo.exists(repo_path):
-        click.echo(f'\'{repo_path}\' is not a valid aim repo.')
+        click.echo(f"'{repo_path}' is not a valid aim repo.")
         exit(1)
 
     zip_buffer = make_zip_archive(repo_path)
@@ -145,8 +156,10 @@ def close_runs(ctx, hashes, yes):
         click.echo('Please specify at least one Run to close.')
         exit(1)
 
-    click.secho(f'This command will forcefully close {len(hashes)} Runs from Aim Repo \'{repo_path}\'. '
-                f'Please make sure Runs are not active. Data corruption may occur otherwise.')
+    click.secho(
+        f"This command will forcefully close {len(hashes)} Runs from Aim Repo '{repo_path}'. "
+        f'Please make sure Runs are not active. Data corruption may occur otherwise.'
+    )
     if yes:
         confirmed = True
     else:
@@ -156,8 +169,45 @@ def close_runs(ctx, hashes, yes):
 
     pool = ThreadPool(cpu_count(logical=False))
 
-    for _ in tqdm.tqdm(
-            pool.imap_unordered(repo._close_run, hashes),
-            desc='Closing runs',
-            total=len(hashes)):
+    for _ in tqdm.tqdm(pool.imap_unordered(repo._close_run, hashes), desc='Closing runs', total=len(hashes)):
         pass
+
+
+@runs.command(name='update-metrics')
+@click.pass_context
+@click.option('-y', '--yes', is_flag=True, help='Automatically confirm prompt')
+def update_metrics(ctx, yes):
+    """Separate Sequence metadata for optimal read."""
+    repo_path = ctx.obj['repo']
+    repo = Repo.from_path(repo_path)
+
+    click.secho(
+        f"This command will update Runs from Aim Repo '{repo_path}' to the latest data format to ensure better "
+        f'performance. Please make sure no Runs are active and Aim UI is not running.'
+    )
+    if yes:
+        confirmed = True
+    else:
+        confirmed = click.confirm('Do you want to proceed?')
+    if not confirmed:
+        return
+
+    index_manager = RepoIndexManager.get_index_manager(repo)
+    hashes = repo.list_all_runs()
+    for run_hash in tqdm.tqdm(hashes, desc='Updating runs', total=len(hashes)):
+        meta_tree = repo.request_tree('meta', run_hash, read_only=False)
+        meta_run_tree = meta_tree.subtree(('meta', 'chunks', run_hash))
+        try:
+            # check if the Run has already been updated.
+            meta_run_tree.first_key('typed_traces')
+            click.secho(f'Run {run_hash} is uo-to-date. Skipping.')
+            continue
+        except KeyError:
+            for ctx_idx, run_ctx_dict in meta_run_tree.subtree('traces').items():
+                assert isinstance(ctx_idx, int)
+                for seq_name in run_ctx_dict.keys():
+                    assert isinstance(seq_name, str)
+                    dtype = run_ctx_dict[seq_name].get('dtype', 'float')
+                    seq_type = SEQUENCE_TYPE_MAP.get(dtype, 'sequence')
+                    meta_run_tree['typed_traces', seq_type, ctx_idx, seq_name] = 1
+            index_manager.index(run_hash)

@@ -1,14 +1,15 @@
 import logging
-from typing import Dict, Optional, Union
-from typing import TYPE_CHECKING
 import pathlib
 
+from typing import TYPE_CHECKING, Dict, Optional, Union
+
+from aim.sdk.errors import MissingRunError
+from aim.sdk.repo_utils import get_repo
+from aim.sdk.tracker import STEP_HASH_FUNCTIONS
+from aim.sdk.utils import generate_run_hash
 from aim.storage.hashing import hash_auto
 from aim.storage.treeview import TreeView
-from aim.sdk.utils import generate_run_hash
-from aim.sdk.repo_utils import get_repo
-from aim.sdk.errors import MissingRunError
-from aim.sdk.tracker import STEP_HASH_FUNCTIONS
+
 
 if TYPE_CHECKING:
     from aim.sdk.repo import Repo
@@ -20,13 +21,16 @@ class BaseRun:
     def __new__(cls, *args, **kwargs):
         # prevent BaseRun from being instantiated directly
         if cls is BaseRun:
-            raise TypeError(f'Only children of \'{cls.__name__}\' may be instantiated.')
+            raise TypeError(f"Only children of '{cls.__name__}' may be instantiated.")
         return object.__new__(cls)
 
-    def __init__(self, run_hash: Optional[str] = None,
-                 repo: Optional[Union[str, 'Repo', pathlib.Path]] = None,
-                 read_only: bool = False,
-                 force_resume: bool = False):
+    def __init__(
+        self,
+        run_hash: Optional[str] = None,
+        repo: Optional[Union[str, 'Repo', pathlib.Path]] = None,
+        read_only: bool = False,
+        force_resume: bool = False,
+    ):
         self._hash = None
         self._lock = None
 
@@ -35,6 +39,7 @@ class BaseRun:
         if self.read_only:
             assert run_hash is not None
             self.hash = run_hash
+            self.meta_tree: TreeView = self.repo.request_tree('meta', read_only=True).subtree('meta')
         else:
             if run_hash is None:
                 self.hash = generate_run_hash()
@@ -44,10 +49,8 @@ class BaseRun:
                 raise MissingRunError(f'Cannot find Run {run_hash} in aim Repo {self.repo.path}.')
             self._lock = self.repo.request_run_lock(self.hash)
             self._lock.lock(force=force_resume)
+            self.meta_tree: TreeView = self.repo.request_tree('meta', self.hash, read_only=False).subtree('meta')
 
-        self.meta_tree: TreeView = self.repo.request_tree(
-            'meta', self.hash, read_only=read_only, from_union=True
-        ).subtree('meta')
         self.meta_run_tree: TreeView = self.meta_tree.subtree('chunks').subtree(self.hash)
 
         self._series_run_trees: Dict[int, TreeView] = None
@@ -63,9 +66,7 @@ class BaseRun:
     @property
     def series_run_trees(self) -> Dict[int, TreeView]:
         if self._series_run_trees is None:
-            series_tree = self.repo.request_tree(
-                'seqs', self.hash, read_only=self.read_only
-            ).subtree('seqs')
+            series_tree = self.repo.request_tree('seqs', self.hash, read_only=self.read_only).subtree('seqs')
             self._series_run_trees = {}
             for version in STEP_HASH_FUNCTIONS.keys():
                 if version == 1:
@@ -101,9 +102,8 @@ class BaseRun:
                     epoch_view = new_series.array('epoch', dtype='int64').allocate()
                     time_view = new_series.array('time', dtype='int64').allocate()
                     for (step, val), (_, epoch), (_, timestamp) in zip(
-                            series.subtree('val').items(),
-                            series.subtree('epoch').items(),
-                            series.subtree('time').items()):
+                        series.subtree('val').items(), series.subtree('epoch').items(), series.subtree('time').items()
+                    ):
                         step_hash = hash_auto(step)
                         step_view[step_hash] = step
                         val_view[step_hash] = val

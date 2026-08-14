@@ -1,16 +1,17 @@
 import os
-import shutil
-import tarfile
 import pathlib
 import re
+import shutil
+import tarfile
 import uuid
+
 from contextlib import contextmanager
-from typing import Union, Any, Tuple, Optional, Callable
+from logging import getLogger
+from typing import Any, Callable, Optional, Tuple, Union
 
 from aim.sdk.configs import get_aim_repo_name
-
 from aim.storage.object import CustomObject
-from logging import getLogger
+
 
 logger = getLogger(__name__)
 
@@ -49,7 +50,7 @@ def clean_repo_path(repo_path: Union[str, pathlib.Path]) -> str:
         return os.path.expanduser('~')
 
     if repo_path.endswith(get_aim_repo_name()):
-        repo_path = repo_path[:-len(get_aim_repo_name())]
+        repo_path = repo_path[: -len(get_aim_repo_name())]
     if repo_path.startswith('~'):
         repo_path = os.path.expanduser('~') + repo_path[1:]
 
@@ -82,9 +83,8 @@ any_list_regex = re.compile(r'list\([A-Za-z]{1}[A-Za-z0-9.]*\)')
 
 
 def check_types_compatibility(
-        dtype: str,
-        base_dtype: str,
-        update_base_dtype_fn: Optional[Callable[[str, str], None]] = None) -> bool:
+    dtype: str, base_dtype: str, update_base_dtype_fn: Optional[Callable[[str, str], None]] = None
+) -> bool:
     if dtype == base_dtype:
         return True
     if base_dtype == 'number' and dtype in {'int', 'float'}:
@@ -144,19 +144,20 @@ def restore_run_backup(repo, run_hash):
 
 
 def prune(repo):
-    from tqdm import tqdm
     from collections.abc import MutableMapping
+
+    from tqdm import tqdm
 
     def flatten(d, parent_path=None):
         if parent_path and not isinstance(parent_path, tuple):
-            parent_path = (parent_path, )
+            parent_path = (parent_path,)
 
         all_paths = set()
         for k, v in d.items():
             if k == '__example_type__':
                 continue
 
-            new_path = parent_path + (k,) if parent_path else (k, )
+            new_path = parent_path + (k,) if parent_path else (k,)
             all_paths.add(new_path)
             if isinstance(v, MutableMapping):
                 all_paths.update(flatten(v, new_path))
@@ -164,13 +165,12 @@ def prune(repo):
         return all_paths
 
     subtrees_to_lookup = ('attrs', 'traces_types', 'contexts', 'traces')
-    repo_meta_tree = repo._get_meta_tree()
 
     # set of all repo paths that can be left dangling after run deletion
     repo_paths = set()
     for key in subtrees_to_lookup:
         try:
-            repo_paths.update(flatten(repo_meta_tree.collect(key, strict=False), parent_path=(key,)))
+            repo_paths.update(flatten(repo.meta_tree.collect(key, strict=False), parent_path=(key,)))
         except KeyError:
             pass
 
@@ -178,7 +178,7 @@ def prune(repo):
     for run_hash in tqdm(run_hashes):
         # construct unique paths set for each run
         run_paths = set()
-        run_meta_tree = repo.request_tree('meta', run_hash, from_union=False, read_only=True).subtree('meta')
+        run_meta_tree = repo.request_tree('meta', run_hash, read_only=True).subtree('meta')
         for key in subtrees_to_lookup:
             try:
                 run_paths.update(flatten(run_meta_tree.collect(key, strict=False), parent_path=(key,)))
