@@ -10,4 +10,4 @@ pandas
 pytest
 flake8
 parameterized==0.8.1
-pytest-cov==2.12.1
+pytest-cov==7.1.0
